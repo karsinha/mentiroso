@@ -39,6 +39,12 @@ class Declaration:
 class AnswerEntry:
     raw_text: str
     normalized: str
+    # Fix: id del jugador de fútbol ya resuelto por el autocompletado
+    # (modo normal). Antes se descartaba y se volvía a "adivinar" el
+    # jugador por texto al validar, lo cual podía fallar si el nombre
+    # era ambiguo (ej. "Ronaldo") aunque el usuario ya lo hubiera
+    # elegido inequívocamente de la lista (Punto 8 del documento).
+    resolved_player_id: Optional[int] = None
 
 
 @dataclass

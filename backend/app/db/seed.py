@@ -5,7 +5,7 @@ con una fuente de datos más completa (Fase 10/25 del documento).
 
 Correr con: python -m app.db.seed
 """
-
+from datetime import date  
 from __future__ import annotations
 
 from app.engine.models import normalize_text
@@ -250,7 +250,7 @@ def run_seed() -> None:
                     PlayerClub(
                         player_id=player.id,
                         club_id=club.id,
-                        end_date=None if is_current else None,  # fechas exactas: TODO fuente de datos real
+                        end_date=None if is_current else date(2020, 1, 1),  # fechas exactas: TODO fuente de datos real
                     )
                 )
 

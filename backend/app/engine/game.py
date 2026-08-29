@@ -167,8 +167,15 @@ class MentirosoGame:
             return 0
         return self.declarations[-1].amount
 
-    def submit_answer(self, player_id: str, text: str) -> int:
-        """Devuelve el índice de la respuesta agregada."""
+    def submit_answer(self, player_id: str, text: str, resolved_player_id: Optional[int] = None) -> int:
+        """Devuelve el índice de la respuesta agregada.
+
+        `resolved_player_id`: si la respuesta vino de un autocompletado
+        (modo normal), acá viaja el id del jugador de fútbol ya
+        desambiguado por el cliente. Se guarda junto con el texto para
+        que la validación final (capa de filtros/DB) no tenga que
+        volver a "adivinar" por texto y pueda fallar por ambigüedad
+        (Punto 8 del documento)."""
         self._require_phase(GamePhase.ANSWERING)
         if player_id != self.declarant_id:
             raise NotYourTurnError("Solo el jugador desafiado puede cargar respuestas.")
@@ -181,7 +188,9 @@ class MentirosoGame:
         if any(a.normalized == normalized for a in self.answers):
             raise DuplicateAnswerError(f"'{text}' ya fue ingresado.")
 
-        self.answers.append(AnswerEntry(raw_text=text, normalized=normalized))
+        self.answers.append(
+            AnswerEntry(raw_text=text, normalized=normalized, resolved_player_id=resolved_player_id)
+        )
         return len(self.answers) - 1
 
     def remove_answer(self, player_id: str, index: int) -> None:
@@ -196,7 +205,9 @@ class MentirosoGame:
         """Cierra la carga de respuestas (por botón "Terminar" o por
         timeout) y devuelve la lista cruda para que la capa externa
         (filters/DB) la valide contra la categoría. No decide nada de
-        fútbol acá."""
+        fútbol acá. No muta `self.answers`: quien llame a esto y
+        necesite también los `resolved_player_id` puede leer
+        `self.answers` directamente antes o después de llamarlo."""
         self._require_phase(GamePhase.ANSWERING)
         return [a.raw_text for a in self.answers]
 

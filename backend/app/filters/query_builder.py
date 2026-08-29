@@ -197,11 +197,29 @@ def resolve_player_by_text(session: Session, text: str) -> int | None:
     return None
 
 
+def resolve_answer_player_id(session: Session, text: str, player_id: int | None = None) -> int | None:
+    """Fix: antes esto vivía inline dentro de `validate_answer` y se
+    recalculaba (junto con `resolve_category`, ¡completa!) por cada
+    respuesta de una demostración. Se separa para poder reusarlo desde
+    `main.py` validando muchas respuestas contra un único cálculo de
+    `resolve_category` (ver `_resolve_answering`).
+
+    Si `player_id` ya vino resuelto por el autocompletado (modo
+    normal), se usa directamente sin volver a "adivinar" por texto."""
+    return player_id if player_id is not None else resolve_player_by_text(session, text)
+
+
 def validate_answer(session: Session, category: CategoryFilter, text: str, player_id: int | None = None) -> bool:
     """`player_id` opcional: si la respuesta vino de un autocompletado
     (modo normal), ya trae el id resuelto sin ambigüedad. Si no, se
-    intenta resolver por texto (modo hardcore)."""
-    pid = player_id if player_id is not None else resolve_player_by_text(session, text)
+    intenta resolver por texto (modo hardcore).
+
+    Nota: esta función queda para uso puntual (un solo chequeo, como en
+    los tests). Para validar N respuestas de una misma demostración,
+    usar `resolve_category` una sola vez + `resolve_answer_player_id`
+    por cada respuesta (ver `main.py::_resolve_answering`), para no
+    recalcular la categoría completa N veces."""
+    pid = resolve_answer_player_id(session, text, player_id)
     if pid is None:
         return False
     valid_ids = resolve_category(session, category)

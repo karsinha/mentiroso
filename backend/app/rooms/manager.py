@@ -44,6 +44,10 @@ class Room:
     pending_category: Optional[CategoryFilter] = None
     betting_timer: Optional[asyncio.Task] = None
     answering_timer: Optional[asyncio.Task] = None
+    # Fix: sala huérfana. Cuando el último jugador se desconecta se
+    # arranca este timer (ver main.py); si nadie vuelve a conectarse
+    # antes de que expire, la sala se borra de memoria.
+    cleanup_timer: Optional[asyncio.Task] = None
 
     def is_full(self) -> bool:
         return len(self.players) >= self.settings.max_players

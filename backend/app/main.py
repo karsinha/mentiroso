@@ -16,7 +16,12 @@ from .engine.game import MentirosoGame
 from .engine.models import CategorySpec, GameConfig, Player as EnginePlayer
 from .engine.states import GamePhase
 from .filters.dsl import CategoryFilter
-from .filters.query_builder import search_players, validate_answer, validate_category
+from .filters.query_builder import (
+    resolve_answer_player_id,
+    resolve_category,
+    search_players,
+    validate_category,
+)
 from .rooms.manager import Room, RoomSettings, room_manager
 from .schemas import (
     INCOMING_MESSAGE_TYPES,
@@ -27,6 +32,25 @@ from .schemas import (
 )
 
 logger = logging.getLogger("mentiroso")
+
+# Fix: mensajes que solo tienen sentido si la partida ya arrancó. Antes
+# esto se detectaba de rebote atajando AttributeError (porque
+# `room.game` era None), lo cual también se comía errores internos
+# reales y los reportaba como "la partida no arrancó".
+GAME_REQUIRED_MESSAGE_TYPES = {
+    "declare",
+    "mentiroso",
+    "submit_answer",
+    "remove_answer",
+    "finish_answering",
+    "next_round",
+    "end_game",
+}
+
+# Fix: cuánto tiempo se mantiene una sala en memoria sin NINGÚN cliente
+# conectado antes de borrarla. Sin esto, `RoomManager.remove_room` nunca
+# se llamaba y las salas se acumulaban para siempre.
+ROOM_CLEANUP_GRACE_SECONDS = 600  # 10 minutos
 
 app = FastAPI(title="Mentiroso")
 app.add_middleware(
@@ -190,14 +214,56 @@ async def refresh_timers(room: Room) -> None:
 async def _resolve_answering(room: Room, ended_by_timeout: bool) -> None:
     game = room.game
     assert game is not None
-    raw_answers = game.finish_answering()
+
+    # Fix: se capturan las entradas (con su resolved_player_id, si
+    # vino de autocompletado) ANTES de cerrar la demostración, y se
+    # resuelve la categoría UNA sola vez para validar todas las
+    # respuestas — antes se recalculaba `resolve_category` (o sea, la
+    # categoría entera) una vez POR CADA respuesta cargada.
+    entries = list(game.answers)
+    game.finish_answering()  # solo valida la fase; tira GameError si no corresponde
+
     session = get_session()
     try:
-        flags = [validate_answer(session, room.pending_category, text) for text in raw_answers]
+        valid_ids = resolve_category(session, room.pending_category)
+        flags = [
+            resolve_answer_player_id(session, entry.raw_text, entry.resolved_player_id) in valid_ids
+            for entry in entries
+        ]
     finally:
         session.close()
+
     game.resolve_round(flags, ended_by_timeout=ended_by_timeout)
     await broadcast(room)
+
+
+# ------------------------------------------------------------------ #
+# Limpieza de salas huérfanas (fix: `remove_room` nunca se llamaba)
+# ------------------------------------------------------------------ #
+
+
+def _cancel_room_cleanup(room: Room) -> None:
+    if room.cleanup_timer is not None and not room.cleanup_timer.done():
+        room.cleanup_timer.cancel()
+    room.cleanup_timer = None
+
+
+async def _room_cleanup_watcher(room: Room) -> None:
+    try:
+        await asyncio.sleep(ROOM_CLEANUP_GRACE_SECONDS)
+    except asyncio.CancelledError:
+        return
+    if room.connections:
+        return  # alguien volvió a conectarse antes de que expire
+    cancel_timers(room)
+    room_manager.remove_room(room.code)
+    logger.info("Sala %s eliminada por inactividad (sin conexiones).", room.code)
+
+
+def _schedule_room_cleanup_if_empty(room: Room) -> None:
+    if not room.connections:
+        _cancel_room_cleanup(room)
+        room.cleanup_timer = asyncio.create_task(_room_cleanup_watcher(room))
 
 
 # ------------------------------------------------------------------ #
@@ -213,7 +279,16 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_id: str) -> N
         return
 
     await websocket.accept()
+    _cancel_room_cleanup(room)
     room.connections[player_id] = websocket
+
+    # Fix: reconexión. Antes, un jugador que se caía quedaba marcado
+    # `connected=False` para siempre; nunca se revertía al volver.
+    if room.game is not None:
+        for p in room.game.players:
+            if p.id == player_id:
+                p.connected = True
+
     await broadcast(room)
 
     try:
@@ -227,6 +302,7 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_id: str) -> N
                 if p.id == player_id:
                     p.connected = False
         await broadcast(room)
+        _schedule_room_cleanup_if_empty(room)
 
 
 async def handle_message(room: Room, player_id: str, websocket: WebSocket, raw: str) -> None:
@@ -240,6 +316,10 @@ async def handle_message(room: Room, player_id: str, websocket: WebSocket, raw: 
         message = model_cls(**payload)
     except (json.JSONDecodeError, ValidationError) as exc:
         await send_error(websocket, f"Mensaje inválido: {exc}")
+        return
+
+    if message.type in GAME_REQUIRED_MESSAGE_TYPES and room.game is None:
+        await send_error(websocket, "La partida todavía no arrancó.")
         return
 
     try:
@@ -256,18 +336,33 @@ async def handle_message(room: Room, player_id: str, websocket: WebSocket, raw: 
             await broadcast(room)
             await refresh_timers(room)
         elif message.type == "submit_answer":
-            room.game.submit_answer(player_id, message.text)
+            # Fix: antes se descartaba message.player_id (el id del
+            # futbolista resuelto por el autocompletado) y se lo
+            # pisaba con el player_id de la conexión WS. Ahora se
+            # threadea correctamente hasta la validación final.
+            room.game.submit_answer(player_id, message.text, message.player_id)
             await broadcast(room)
         elif message.type == "remove_answer":
             room.game.remove_answer(player_id, message.index)
             await broadcast(room)
         elif message.type == "finish_answering":
-            cancel_timers(room)
-            await _resolve_answering(room, ended_by_timeout=False)
+            # Fix: antes cualquier jugador conectado podía cortarle la
+            # demostración a otro.
+            if player_id != room.game.declarant_id:
+                await send_error(websocket, "Solo el jugador desafiado puede terminar la demostración.")
+            else:
+                cancel_timers(room)
+                await _resolve_answering(room, ended_by_timeout=False)
         elif message.type == "next_round":
-            room.game.start_next_round()
-            room.pending_category = None
-            await broadcast(room)
+            # Fix: antes cualquier jugador podía forzar el avance de
+            # ronda; el frontend solo ocultaba el botón, no protegía
+            # el mensaje real por WS.
+            if player_id != room.host_player_id:
+                await send_error(websocket, "Solo el anfitrión puede pasar a la siguiente ronda.")
+            else:
+                room.game.start_next_round()
+                room.pending_category = None
+                await broadcast(room)
         elif message.type == "end_game":
             if player_id != room.host_player_id:
                 await send_error(websocket, "Solo el anfitrión puede terminar la partida.")
@@ -277,8 +372,18 @@ async def handle_message(room: Room, player_id: str, websocket: WebSocket, raw: 
                 await broadcast(room)
     except GameError as exc:
         await send_error(websocket, str(exc))
-    except AttributeError:
-        await send_error(websocket, "La partida todavía no arrancó.")
+    except Exception:
+        # Fix: antes un `except AttributeError` genérico se comía
+        # también errores internos reales y los reportaba siempre como
+        # "la partida no arrancó". Ahora ese caso se chequea explícito
+        # arriba, y cualquier otra excepción se loguea de verdad.
+        logger.exception(
+            "Error inesperado procesando mensaje '%s' en sala %s (jugador %s)",
+            message.type,
+            room.code,
+            player_id,
+        )
+        await send_error(websocket, "Ocurrió un error inesperado procesando tu acción.")
 
 
 async def on_start_game(room: Room, player_id: str, websocket: WebSocket) -> None:
