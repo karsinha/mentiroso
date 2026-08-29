@@ -71,8 +71,6 @@ def parse_champions_table(wikitext: str) -> list[TitleWin]:
             _flush_row()
             current_row = []
             continue
-        if stripped.startswith("!"):
-            continue
         current_row.append(line)
     _flush_row()
 
@@ -94,12 +92,12 @@ if __name__ == "__main__":
     # Prueba exploratoria -- REVISAR A MANO antes de confiar.
     from .wiki_common import get_sections
 
-    ARTICLE = "List of Copa Libertadores champions"  # confirmar título exacto
+    ARTICLE = "List of Copa Libertadores finals"  # confirmar título exacto
     print(f"--- Secciones de '{ARTICLE}' ---")
     for s in get_sections(ARTICLE):
         print(repr(s["index"]), repr(s["line"]))
 
     print(f"\n--- Títulos extraídos ---")
-    wins = fetch_champions_history(ARTICLE)
+    wins = fetch_champions_history(ARTICLE, section_name="List of finals")
     for w in wins:
         print(w)

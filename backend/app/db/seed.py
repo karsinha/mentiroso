@@ -223,10 +223,12 @@ def run_seed() -> None:
         session.flush()  # asigna IDs
 
         for name, aliases, nationality, status, achievements, played_clubs in PLAYERS:
+
             player = Player(
                 name=name,
                 normalized_name=normalize_text(name),
                 nationality=nationality,
+                normalized_nationality=normalize_text(nationality),
                 status=status,
             )
             session.add(player)

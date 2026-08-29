@@ -73,15 +73,20 @@ class RoomManager:
     def get_room(self, code: str) -> Optional[Room]:
         return self._rooms.get(code.upper())
 
-    def join_room(self, code: str, player_name: str) -> tuple[Optional[Room], Optional[str]]:
+    def join_room(self, code: str, player_name: str) -> tuple[Optional[Room], Optional[str], Optional[str]]:
+        """Devuelve (room, player_id, error_reason).
+        error_reason es None si salió todo bien; si no, es "started" o
+        "full", para que la capa HTTP arme el mensaje correcto."""
         room = self.get_room(code)
         if room is None:
-            return None, None
+            return None, None, None
+        if room.game is not None:
+            return room, None, "started"
         if room.is_full():
-            return room, None
+            return room, None, "full"
         pid = f"pl_{random.randint(100000, 999999)}"
         room.players[pid] = Player(id=pid, name=player_name)
-        return room, pid
+        return room, pid, None
 
     def remove_room(self, code: str) -> None:
         self._rooms.pop(code.upper(), None)

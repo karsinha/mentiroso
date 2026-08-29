@@ -32,6 +32,7 @@ ConditionType = Literal["achievement", "nationality", "status", "club"]
 class AchievementCondition(BaseModel):
     type: Literal["achievement"] = "achievement"
     achievement_code: str  # debe existir en AchievementType.code (whitelisteado en DB)
+    result: Literal["CHAMPION", "RUNNER_UP"] = "CHAMPION"
     min_count: int = Field(default=1, ge=1)
     negate: bool = False
 
@@ -78,7 +79,8 @@ def _describe_condition(c: Condition) -> str:
     prefix = "nunca " if c.negate else ""
     if isinstance(c, AchievementCondition):
         extra = f" ({c.min_count}+)" if c.min_count > 1 else ""
-        return f"{prefix}ganaron {c.achievement_code}{extra}"
+        verbo = "salieron subcampeones de" if c.result == "RUNNER_UP" else "ganaron"
+        return f"{prefix}{verbo} {c.achievement_code}{extra}"
     if isinstance(c, NationalityCondition):
         return f"{prefix}son de nacionalidad {c.nationality}"
     if isinstance(c, StatusCondition):

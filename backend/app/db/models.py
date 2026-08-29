@@ -34,6 +34,13 @@ class PlayerStatus(str, enum.Enum):
     RETIRED = "RETIRED"
 
 
+class AchievementResult(str, enum.Enum):
+    """Campeón o subcampeón de esa edición/temporada."""
+
+    CHAMPION = "CHAMPION"
+    RUNNER_UP = "RUNNER_UP"
+
+
 class EntityType(str, enum.Enum):
     """Preparado para crecer más allá de jugadores sin tocar el esquema
     de Achievement."""
@@ -52,6 +59,7 @@ class Player(Base):
     normalized_name: Mapped[str] = mapped_column(String(120), index=True)
     birth_date: Mapped[date | None] = mapped_column(nullable=True)
     nationality: Mapped[str] = mapped_column(String(60), index=True)
+    normalized_nationality: Mapped[str] = mapped_column(String(60), index=True)
     status: Mapped[PlayerStatus] = mapped_column(SAEnum(PlayerStatus), index=True)
 
     aliases: Mapped[list["PlayerAlias"]] = relationship(back_populates="player", cascade="all, delete-orphan")
@@ -120,6 +128,7 @@ class Achievement(Base):
     entity_type: Mapped[EntityType] = mapped_column(SAEnum(EntityType), index=True)
     entity_id: Mapped[int] = mapped_column(index=True)
     achievement_type_id: Mapped[int] = mapped_column(ForeignKey("achievement_type.id"), index=True)
+    result: Mapped[AchievementResult] = mapped_column(SAEnum(AchievementResult), default=AchievementResult.CHAMPION, index=True)
     competition_id: Mapped[int | None] = mapped_column(ForeignKey("competition.id"), nullable=True)
     year: Mapped[int | None] = mapped_column(nullable=True)
     club_id: Mapped[int | None] = mapped_column(ForeignKey("club.id"), nullable=True)

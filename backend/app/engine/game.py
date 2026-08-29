@@ -257,7 +257,9 @@ class MentirosoGame:
     def start_next_round(self) -> None:
         self._require_phase(GamePhase.RESULT)
         self.starter_index = (self.starter_index + 1) % len(self.players)
+        self.turn_index = self.starter_index
         self.phase = GamePhase.CATEGORY_SELECTION
+        
 
     def finish_game(self) -> None:
         self.phase = GamePhase.FINISHED
@@ -343,3 +345,4 @@ class MentirosoGame:
                 else None
             ),
         }
+

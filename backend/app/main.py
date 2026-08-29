@@ -88,10 +88,12 @@ def create_room(req: CreateRoomRequest) -> CreateRoomResponse:
 
 @app.post("/api/rooms/{room_code}/join", response_model=JoinRoomResponse)
 def join_room(room_code: str, req: JoinRoomRequest) -> JoinRoomResponse:
-    room, player_id = room_manager.join_room(room_code, req.player_name)
+    room, player_id, error_reason = room_manager.join_room(room_code, req.player_name)
     if room is None:
         raise HTTPException(status_code=404, detail="La sala no existe.")
-    if player_id is None:
+    if error_reason == "started":
+        raise HTTPException(status_code=409, detail="La partida ya empezó, no se puede unir ahora.")
+    if error_reason == "full":
         raise HTTPException(status_code=409, detail="La sala está llena.")
     return JoinRoomResponse(room_code=room.code, player_id=player_id)
 

@@ -56,6 +56,7 @@ def _resolve_achievement(session: Session, c: AchievementCondition) -> set[int]:
         select(Achievement.entity_id, Achievement.id)
         .where(Achievement.achievement_type_id == at_id)
         .where(Achievement.entity_type == "PLAYER")
+        .where(Achievement.result == c.result)
     ).all()
     counts: dict[int, int] = {}
     for entity_id, _ in rows:
@@ -65,8 +66,9 @@ def _resolve_achievement(session: Session, c: AchievementCondition) -> set[int]:
 
 def _resolve_nationality(session: Session, c: NationalityCondition) -> set[int]:
     target = normalize_text(c.nationality)
-    rows = session.execute(select(Player.id, Player.nationality)).all()
-    return {pid for pid, nat in rows if normalize_text(nat) == target}
+    return set(
+        session.scalars(select(Player.id).where(Player.normalized_nationality == target)).all()
+    )
 
 
 def _resolve_status(session: Session, c: StatusCondition) -> set[int]:
