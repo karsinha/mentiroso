@@ -5,10 +5,12 @@ con una fuente de datos más completa (Fase 10/25 del documento).
 
 Correr con: python -m app.db.seed
 """
-from datetime import date  
 from __future__ import annotations
 
+from datetime import date
+
 from app.engine.models import normalize_text
+
 
 from . import database
 from .models import (

@@ -69,14 +69,6 @@ class PlayerAlias(Base):
     player: Mapped["Player"] = relationship(back_populates="aliases")
 
 
-class Club(Base):
-    __tablename__ = "club"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(120))
-    normalized_name: Mapped[str] = mapped_column(String(120), index=True)
-    country: Mapped[str] = mapped_column(String(60))
-
 
 class PlayerClub(Base):
     """Múltiples filas por el mismo (player, club) están permitidas
@@ -135,3 +127,13 @@ class Achievement(Base):
     achievement_type: Mapped["AchievementType"] = relationship()
     competition: Mapped["Competition | None"] = relationship()
     club: Mapped["Club | None"] = relationship()
+
+class Club(Base):
+    __tablename__ = "club"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    normalized_name: Mapped[str] = mapped_column(String(120), index=True)
+    country: Mapped[str] = mapped_column(String(60))
+    league_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    tier: Mapped[int | None] = mapped_column(nullable=True)
