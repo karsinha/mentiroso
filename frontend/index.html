@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MENTIROSO</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/3.4.1/tailwind.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.13.5/cdn.min.js"></script>
+<style>
+  body { font-family: ui-sans-serif, system-ui, sans-serif; }
+  .card { background:#111827; border:1px solid #1f2937; border-radius:1rem; }
+</style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+
+<div x-data="mentiroso()" x-init="init()" class="max-w-xl mx-auto p-4 pb-24">
+
+  <header class="flex items-center justify-between py-4">
+    <h1 class="text-2xl font-black tracking-tight">🔥 MENTIROSO</h1>
+    <span x-show="roomCode" class="text-sm text-gray-400">Sala <span class="font-mono font-bold text-gray-200" x-text="roomCode"></span></span>
+  </header>
+
+  <!-- ERROR TOAST -->
+  <div x-show="errorMsg" x-transition class="mb-3 p-3 rounded-lg bg-red-900/60 border border-red-700 text-red-200 text-sm" x-text="errorMsg"></div>
+  <div x-show="infoMsg" x-transition class="mb-3 p-3 rounded-lg bg-amber-900/50 border border-amber-700 text-amber-200 text-sm" x-text="infoMsg"></div>
+
+  <!-- ============== HOME: crear / unirse ============== -->
+  <template x-if="!roomCode">
+    <div class="space-y-6">
+      <div class="card p-5 space-y-3">
+        <h2 class="font-bold text-lg">Crear sala</h2>
+        <input x-model="hostName" placeholder="Tu nombre" class="w-full bg-gray-800 rounded-lg px-3 py-2 outline-none" />
+        <div class="grid grid-cols-2 gap-2 text-sm">
+          <label class="flex flex-col gap-1">Mín. jugadores
+            <input type="number" x-model.number="settings.min_players" min="2" max="8" class="bg-gray-800 rounded-lg px-2 py-1" />
+          </label>
+          <label class="flex flex-col gap-1">Máx. jugadores
+            <input type="number" x-model.number="settings.max_players" min="2" max="8" class="bg-gray-800 rounded-lg px-2 py-1" />
+          </label>
+          <label class="flex flex-col gap-1">Mín. respuestas cat.
+            <input type="number" x-model.number="settings.min_category_answers" min="1" class="bg-gray-800 rounded-lg px-2 py-1" />
+          </label>
+          <label class="flex flex-col gap-1">Timer apuesta (s)
+            <input type="number" x-model.number="settings.betting_timeout_seconds" class="bg-gray-800 rounded-lg px-2 py-1" />
+          </label>
+          <label class="flex flex-col gap-1">Timer demostrar (s)
+            <input type="number" x-model.number="settings.answering_timeout_seconds" class="bg-gray-800 rounded-lg px-2 py-1" />
+          </label>
+          <label class="flex items-center gap-2 mt-4">
+            <input type="checkbox" x-model="settings.hardcore_mode" /> Modo hardcore
+          </label>
+        </div>
+        <button @click="createRoom()" class="w-full bg-emerald-600 hover:bg-emerald-500 rounded-lg py-2 font-bold">Crear partida</button>
+      </div>
+
+      <div class="card p-5 space-y-3">
+        <h2 class="font-bold text-lg">Unirse a una sala</h2>
+        <input x-model="joinName" placeholder="Tu nombre" class="w-full bg-gray-800 rounded-lg px-3 py-2 outline-none" />
+        <input x-model="joinCode" placeholder="Código de sala" class="w-full bg-gray-800 rounded-lg px-3 py-2 outline-none uppercase" />
+        <button @click="joinRoom()" class="w-full bg-indigo-600 hover:bg-indigo-500 rounded-lg py-2 font-bold">Unirme</button>
+      </div>
+    </div>
+  </template>
+
+  <!-- ============== LOBBY (pre-inicio) ============== -->
+  <template x-if="roomCode && !state?.game">
+    <div class="space-y-4">
+      <div class="card p-5">
+        <h2 class="font-bold mb-2">Jugadores</h2>
+        <ul class="space-y-1">
+          <template x-for="p in players()" :key="p.id">
+            <li class="flex justify-between text-sm py-1 border-b border-gray-800">
+              <span x-text="p.name"></span>
+              <span x-show="p.id === hostId()" class="text-amber-400 text-xs">Anfitrión</span>
+            </li>
+          </template>
+        </ul>
+      </div>
+      <button x-show="isHost()" @click="send({type:'start_game'})" class="w-full bg-emerald-600 hover:bg-emerald-500 rounded-lg py-3 font-bold">
+        Iniciar partida
+      </button>
+      <p x-show="!isHost()" class="text-center text-gray-400 text-sm">Esperando a que el anfitrión inicie la partida...</p>
+    </div>
+  </template>
+
+  <!-- ============== SCOREBOARD (siempre visible en partida) ============== -->
+  <template x-if="state?.game">
+    <div class="flex flex-wrap gap-2 mb-4">
+      <template x-for="p in players()" :key="p.id">
+        <div class="px-3 py-1.5 rounded-full text-xs font-bold"
+             :class="p.id === myId ? 'bg-indigo-600' : 'bg-gray-800'">
+          <span x-text="p.name"></span>:
+          <span x-text="state.game.scores[p.id] ?? 0"></span>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <!-- ============== ELEGIR CATEGORÍA ============== -->
+  <template x-if="state?.game && (state.phase === 'WAITING_FOR_PLAYERS' || state.phase === 'CATEGORY_SELECTION')">
+    <div class="card p-5 space-y-4">
+      <h2 class="font-bold text-lg" x-text="canProposeCategory() ? 'Armá el desafío' : 'Esperando la categoría...'"></h2>
+
+      <template x-if="canProposeCategory()">
+        <div class="space-y-3">
+          <div>
+            <label class="text-sm text-gray-400">Combinar con</label>
+            <select x-model="cat.operator" class="w-full bg-gray-800 rounded-lg px-2 py-1">
+              <option value="AND">Y (deben cumplirse todas)</option>
+              <option value="OR">O (alcanza con una)</option>
+            </select>
+          </div>
+
+          <div>
+            <p class="text-sm text-gray-400 mb-1">Títulos / premios</p>
+            <div class="grid grid-cols-2 gap-1 text-sm">
+              <template x-for="code in achievementCodes" :key="code">
+                <label class="flex items-center gap-1">
+                  <input type="checkbox" :value="code" @change="toggleAchievement(code, $event.target.checked)" />
+                  <span x-text="achievementLabels[code]"></span>
+                </label>
+              </template>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <label class="flex flex-col gap-1">Nacionalidad
+              <input x-model="cat.nationality" placeholder="ej: Argentina" class="bg-gray-800 rounded-lg px-2 py-1" />
+            </label>
+            <label class="flex flex-col gap-1">Club (alguna vez)
+              <input x-model="cat.club" placeholder="ej: Boca Juniors" class="bg-gray-800 rounded-lg px-2 py-1" />
+            </label>
+            <label class="flex flex-col gap-1">Estado
+              <select x-model="cat.status" class="bg-gray-800 rounded-lg px-2 py-1">
+                <option value="">(cualquiera)</option>
+                <option value="ACTIVE">En actividad</option>
+                <option value="RETIRED">Retirado</option>
+              </select>
+            </label>
+          </div>
+
+          <button @click="proposeCategory()" class="w-full bg-emerald-600 hover:bg-emerald-500 rounded-lg py-2 font-bold">
+            Confirmar categoría
+          </button>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <!-- ============== BETTING ============== -->
+  <template x-if="state?.game?.phase === 'BETTING'">
+    <div class="card p-5 space-y-4">
+      <p class="text-sm text-gray-400">Categoría</p>
+      <p class="font-bold" x-text="state.game.category"></p>
+
+      <div class="text-center py-3">
+        <template x-if="state.game.declared_amount">
+          <p class="text-3xl font-black">
+            <span x-text="lastDeclarantName()"></span> dice: <span x-text="state.game.declared_amount"></span>
+          </p>
+        </template>
+        <template x-if="!state.game.declared_amount">
+          <p class="text-gray-400">Nadie declaró todavía en esta ronda.</p>
+        </template>
+      </div>
+
+      <p class="text-center text-sm" :class="isMyTurn() ? 'text-emerald-400 font-bold' : 'text-gray-500'">
+        <span x-text="isMyTurn() ? 'Tu turno' : (turnPlayerName() + ' está pensando...')"></span>
+      </p>
+
+      <template x-if="isMyTurn()">
+        <div class="space-y-2">
+          <div class="flex gap-2">
+            <input type="number" x-model.number="raiseAmount" :min="(state.game.declared_amount||0)+1" class="flex-1 bg-gray-800 rounded-lg px-3 py-2" />
+            <button @click="declare()" class="bg-indigo-600 hover:bg-indigo-500 rounded-lg px-4 font-bold">Subir</button>
+          </div>
+          <button x-show="state.game.declared_amount" @click="callMentiroso()" class="w-full bg-red-700 hover:bg-red-600 rounded-lg py-3 font-black text-lg">
+            🔥 ¡MENTIROSO!
+          </button>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <!-- ============== ANSWERING (demostración) ============== -->
+  <template x-if="state?.game?.phase === 'ANSWERING'">
+    <div class="card p-5 space-y-4">
+      <p class="text-sm text-gray-400">
+        <span x-text="declarantName()"></span> tiene que demostrar
+        <span class="font-bold text-gray-200" x-text="state.game.declared_amount"></span> respuestas
+      </p>
+      <p class="font-bold" x-text="state.game.category"></p>
+
+      <template x-if="isDeclarant()">
+        <div class="space-y-2">
+          <div class="flex gap-2">
+            <input x-model="answerText" @keyup.enter="submitAnswer()" placeholder="Escribí un jugador..." class="flex-1 bg-gray-800 rounded-lg px-3 py-2" list="player-suggestions" />
+            <button @click="submitAnswer()" class="bg-emerald-600 hover:bg-emerald-500 rounded-lg px-4 font-bold">+</button>
+          </div>
+          <datalist id="player-suggestions">
+            <template x-for="s in suggestions" :key="s.player_id">
+              <option :value="s.name"></option>
+            </template>
+          </datalist>
+          <ul class="space-y-1">
+            <template x-for="(a, idx) in (state.game.answers || [])" :key="idx">
+              <li class="flex justify-between items-center bg-gray-800 rounded-lg px-3 py-1.5 text-sm">
+                <span x-text="(idx+1) + '. ' + a"></span>
+                <button @click="removeAnswer(idx)" class="text-red-400">✕</button>
+              </li>
+            </template>
+          </ul>
+          <button @click="finishAnswering()" class="w-full bg-amber-600 hover:bg-amber-500 rounded-lg py-2 font-bold">Terminar</button>
+        </div>
+      </template>
+
+      <template x-if="!isDeclarant()">
+        <p class="text-center text-gray-400 py-6">
+          Cargó <span class="font-bold text-gray-200" x-text="state.game.answers_loaded"></span>
+          de <span x-text="state.game.declared_amount"></span>...
+        </p>
+      </template>
+    </div>
+  </template>
+
+  <!-- ============== RESULT ============== -->
+  <template x-if="state?.game?.phase === 'RESULT'">
+    <div class="card p-5 space-y-3">
+      <p class="text-center text-2xl font-black" x-text="state.game.last_result.success ? '✅ ¡LO DEMOSTRÓ!' : '💀 NO PUDO DEMOSTRARLO'"></p>
+      <p class="text-center text-sm text-gray-400">
+        <span x-text="playerName(state.game.last_result.declarant_id)"></span> vs
+        <span x-text="playerName(state.game.last_result.challenger_id)"></span>
+      </p>
+      <ul class="space-y-1 mt-3">
+        <template x-for="(a, idx) in state.game.last_result.answers" :key="idx">
+          <li class="flex justify-between text-sm px-3 py-1 rounded-lg"
+              :class="state.game.last_result.valid_flags[idx] ? 'bg-emerald-900/40' : 'bg-red-900/40'">
+            <span x-text="a"></span>
+            <span x-text="state.game.last_result.valid_flags[idx] ? '✓' : '✗'"></span>
+          </li>
+        </template>
+      </ul>
+      <button x-show="isHost()" @click="send({type:'next_round'})" class="w-full bg-indigo-600 hover:bg-indigo-500 rounded-lg py-2 font-bold mt-3">
+        Siguiente ronda
+      </button>
+      <button x-show="isHost()" @click="send({type:'end_game'})" class="w-full bg-gray-700 hover:bg-gray-600 rounded-lg py-2 text-sm">
+        Terminar partida
+      </button>
+    </div>
+  </template>
+
+  <!-- ============== FINISHED ============== -->
+  <template x-if="state?.game?.phase === 'FINISHED'">
+    <div class="card p-5 space-y-2">
+      <h2 class="font-bold text-lg text-center">Partida terminada 🏁</h2>
+      <template x-for="p in rankedPlayers()" :key="p.id">
+        <div class="flex justify-between px-3 py-2 border-b border-gray-800">
+          <span x-text="p.name"></span>
+          <span class="font-bold" x-text="state.game.scores[p.id] ?? 0"></span>
+        </div>
+      </template>
+    </div>
+  </template>
+
+</div>
+
+<script>
+function mentiroso() {
+  return {
+    // conexión
+    ws: null,
+    myId: localStorage.getItem('mentiroso_player_id') || null,
+    roomCode: localStorage.getItem('mentiroso_room_code') || null,
+    state: null,
+    errorMsg: '', infoMsg: '',
+
+    // formularios
+    hostName: '', joinName: '', joinCode: '',
+    settings: { min_players: 2, max_players: 8, min_category_answers: 10, betting_timeout_seconds: 30, answering_timeout_seconds: 60, hardcore_mode: false },
+
+    // categoría en construcción
+    achievementCodes: ['champions','mundial','libertadores','copa_america','eurocopa','balon_de_oro','the_best','bota_de_oro'],
+    achievementLabels: { champions:'Champions', mundial:'Mundial', libertadores:'Libertadores', copa_america:'Copa América', eurocopa:'Eurocopa', balon_de_oro:'Balón de Oro', the_best:'The Best', bota_de_oro:'Bota de Oro' },
+    cat: { operator: 'AND', achievements: [], nationality: '', club: '', status: '' },
+
+    // juego
+    raiseAmount: 1, answerText: '', suggestions: [],
+
+    init() {
+      if (this.roomCode && this.myId) this.connect();
+    },
+
+    apiBase() { return ''; },
+
+    async createRoom() {
+      const res = await fetch('/api/rooms', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ host_name: this.hostName || 'Anfitrión', ...this.settings })
+      });
+      if (!res.ok) { this.showError('No se pudo crear la sala'); return; }
+      const data = await res.json();
+      this.roomCode = data.room_code; this.myId = data.player_id;
+      localStorage.setItem('mentiroso_room_code', this.roomCode);
+      localStorage.setItem('mentiroso_player_id', this.myId);
+      this.connect();
+    },
+
+    async joinRoom() {
+      const code = this.joinCode.trim().toUpperCase();
+      const res = await fetch(`/api/rooms/${code}/join`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ player_name: this.joinName || 'Jugador' })
+      });
+      if (!res.ok) { this.showError('No se pudo unir a la sala (¿código correcto?)'); return; }
+      const data = await res.json();
+      this.roomCode = data.room_code; this.myId = data.player_id;
+      localStorage.setItem('mentiroso_room_code', this.roomCode);
+      localStorage.setItem('mentiroso_player_id', this.myId);
+      this.connect();
+    },
+
+    connect() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      this.ws = new WebSocket(`${proto}://${location.host}/ws/${this.roomCode}?player_id=${this.myId}`);
+      this.ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'state') { this.state = msg.state; this.raiseAmount = (this.state.game?.declared_amount || 0) + 1; }
+        else if (msg.type === 'error') this.showError(msg.message);
+        else if (msg.type === 'info') this.showInfo(msg.message);
+      };
+      this.ws.onclose = () => { /* podría reintentar reconexión acá */ };
+    },
+
+    send(obj) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj)); },
+
+    showError(m) { this.errorMsg = m; setTimeout(() => this.errorMsg = '', 4000); },
+    showInfo(m) { this.infoMsg = m; setTimeout(() => this.infoMsg = '', 4000); },
+
+    players() { return this.state?.players || []; },
+    hostId() { return this.state?.host_player_id; },
+    isHost() { return this.myId === this.hostId(); },
+    playerName(id) { return this.players().find(p => p.id === id)?.name || '?'; },
+    turnPlayerName() { return this.playerName(this.state?.game?.current_turn_player_id); },
+    lastDeclarantName() {
+      const decls = this.state?.game?.declarations || [];
+      if (!decls.length) return '';
+      return this.playerName(decls[decls.length - 1].player_id);
+    },
+    declarantName() { return this.playerName(this.state?.game?.declarant_id); },
+    isMyTurn() { return this.state?.game?.current_turn_player_id === this.myId; },
+    isDeclarant() { return this.state?.game?.declarant_id === this.myId; },
+
+    canProposeCategory() {
+      if (!this.state?.game) return false;
+      if (this.state.phase === 'WAITING_FOR_PLAYERS') return this.isHost();
+      if (this.state.phase === 'CATEGORY_SELECTION') return this.state.game.current_turn_player_id === this.myId;
+      return false;
+    },
+
+    toggleAchievement(code, checked) {
+      this.cat.achievements = this.cat.achievements.filter(a => a !== code);
+      if (checked) this.cat.achievements.push(code);
+    },
+
+    buildCategoryPayload() {
+      const conditions = [];
+      for (const code of this.cat.achievements) {
+        conditions.push({ type: 'achievement', achievement_code: code, min_count: 1, negate: false });
+      }
+      if (this.cat.nationality.trim()) conditions.push({ type: 'nationality', nationality: this.cat.nationality.trim(), negate: false });
+      if (this.cat.club.trim()) conditions.push({ type: 'club', club_name: this.cat.club.trim(), current_only: false, negate: false });
+      if (this.cat.status) conditions.push({ type: 'status', status: this.cat.status, negate: false });
+      return { entity_type: 'player', operator: this.cat.operator, conditions };
+    },
+
+    proposeCategory() {
+      const category = this.buildCategoryPayload();
+      if (!category.conditions.length) { this.showError('Elegí al menos un filtro.'); return; }
+      this.send({ type: 'propose_category', category });
+    },
+
+    declare() { this.send({ type: 'declare', amount: this.raiseAmount }); },
+    callMentiroso() { this.send({ type: 'mentiroso' }); },
+
+    async submitAnswer() {
+      const text = this.answerText.trim();
+      if (!text) return;
+      this.send({ type: 'submit_answer', text });
+      this.answerText = ''; this.suggestions = [];
+    },
+    removeAnswer(idx) { this.send({ type: 'remove_answer', index: idx }); },
+    finishAnswering() { this.send({ type: 'finish_answering' }); },
+
+    rankedPlayers() {
+      const scores = this.state?.game?.scores || {};
+      return [...this.players()].sort((a, b) => (scores[b.id] ?? 0) - (scores[a.id] ?? 0));
+    },
+  };
+}
+
+// autocompletado con debounce simple (Punto 8): solo ayuda a escribir,
+// nunca filtra por si la respuesta es correcta.
+document.addEventListener('alpine:init', () => {
+  let t;
+  document.addEventListener('input', (e) => {
+    if (e.target.id !== undefined && e.target.matches('input[list="player-suggestions"]')) {
+      clearTimeout(t);
+      const q = e.target.value;
+      t = setTimeout(async () => {
+        if (q.length < 2) return;
+        const res = await fetch(`/api/players/search?q=${encodeURIComponent(q)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const comp = Alpine.$data(document.querySelector('[x-data]'));
+          comp.suggestions = data;
+        }
+      }, 200);
+    }
+  });
+});
+</script>
+</body>
+</html>
